@@ -19,7 +19,7 @@ const headers = {
 };
 
 // Define your inputs here
-const username = 'pls1733';  // Replace with the target username
+const username = 'pls1731';  // Replace with the target username
 const startRange = 000000;            // Replace with the start of the password range
 const endRange = 999999;             // Replace with the end of the password range
 const useLogFile = false;             // Set to true if you want to use a log file, false otherwise
